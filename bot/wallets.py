@@ -1,5 +1,6 @@
 """Wallet-Tracking: Was kaufen/verkaufen die Wallets, die du beobachtest?"""
 import logging
+import time
 from html import escape
 
 from .chains import CHAINS, EVM_CHAINS, norm
@@ -15,19 +16,51 @@ class WalletTracker:
     def __init__(self, http, settings, db, market, security, tg, scanner):
         self.http, self.s, self.db = http, settings, db
         self.market, self.sec, self.tg, self.scanner = market, security, tg, scanner
-        self.cfg = settings.get("wallets", default={}) or {}
+
+    @property
+    def cfg(self):
+        return self.s.section("wallets")
+
+    def import_list(self) -> int:
+        """Wallet-Liste aus config.yaml übernehmen (nur neue; mit /unwatch entfernte bleiben weg)."""
+        done = set(self.db.kv_get("wallet_list_done", []))
+        n = 0
+        for entry in self.cfg.get("list") or []:
+            label, *addrs = entry
+            for a in addrs:
+                if not a or a in done:
+                    continue
+                if a.startswith("0x"):
+                    self.db.add_wallet("evm", a.lower(), label)
+                else:
+                    self.db.add_wallet("solana", a, label)
+                done.add(a)
+                n += 1
+        self.db.kv_set("wallet_list_done", sorted(done))
+        return n
 
     async def run_cycle(self):
+        await self.run_solana()
+        await self.run_evm()
+
+    async def run_solana(self):
         for w in self.db.wallets():
-            try:
-                if w["chain"] == "solana":
+            if w["chain"] == "solana":
+                try:
                     await self._solana(w["address"], w["label"])
-                else:
-                    for chain in EVM_CHAINS:
-                        if chain in self.s.chains:
-                            await self._evm(chain, w["address"], w["label"])
-            except Exception:
-                log.exception("Wallet-Fehler %s", w["address"])
+                except Exception:
+                    log.exception("Wallet-Fehler %s", w["address"])
+
+    async def run_evm(self):
+        for w in self.db.wallets():
+            if w["chain"] == "solana":
+                continue
+            for chain in EVM_CHAINS:
+                if chain in self.s.chains:
+                    try:
+                        await self._evm(chain, w["address"], w["label"])
+                    except Exception:
+                        log.exception("Wallet-Fehler %s %s", chain, w["address"])
 
     # ------------------------- EVM -------------------------
     async def _fetch_tokentx(self, chain, wallet) -> list[dict] | None:
@@ -127,30 +160,121 @@ class WalletTracker:
         value = amount * m["price"]
         if value < self.cfg.get("min_buy_usd", 100):
             return
+        self.db.add_wallet_trade(chain, token, wallet, label, direction, value, m["mcap"], closed)
+
+        hours = self.cfg.get("cluster_hours", 12)
+        need = self.cfg.get("cluster_min_wallets", 4)
+        buyers = self.db.wallet_buyers(token, hours)
+        holding = [b for b in buyers if not b["exited"]]
 
         if direction == "in":
-            sec = await self.sec.check(chain, token, m["pair"])
-            if not sec.passed and not self.cfg.get("alert_on_unsafe", True):
-                return
-            verdict = "✅ Sicherheits-Checks bestanden" if sec.passed else \
-                "🚨 ACHTUNG: " + escape("; ".join(sec.hard_fails[:4]))
-            title = "🐋 WALLET KAUFT" + (" (neue Position)" if new_position else " (nachgekauft)")
-            # in die normale Coin-Pipeline aufnehmen
             self.db.add_candidate(chain, token, f"Wallet {label}", m["symbol"])
+            done = self.db.kv_get(f"cluster:{token}", 0)
+            n = len(holding)
+            if n >= need and done == 0:
+                self.db.kv_set(f"cluster:{token}", n)
+                return await self.cluster_call(chain, token, pair, buyers, first=True)
+            nxt = next((x for x in (6, 10, 15, 20, 30) if x > done), 999)
+            if done and n >= nxt:
+                self.db.kv_set(f"cluster:{token}", n)
+                names = ", ".join(escape(b["label"]) for b in holding[-(n - done):])
+                return await self.tg.alert(
+                    f"<b>🐋 ${escape(m['symbol'])}: jetzt {n} Smart-Money-Wallets drin</b>\n"
+                    f"Neu dazu: {names}\nMCap {usd(m['mcap'])} · 1h {m['chg_1h']:+.0f}%\n{links(chain, token, m)}")
+            await self._single(chain, wallet, label, token, m, value, new_position, n, need)
         else:
-            verdict = ""
-            title = "📤 WALLET VERKAUFT" + (" (komplett raus)" if closed else "")
+            if self.db.kv_get(f"cluster:{token}", 0) and not self.db.kv_get(f"cluster_exit:{token}"):
+                out = [b for b in buyers if b["exited"]]
+                if len(out) >= max(2, len(buyers) / 2):
+                    self.db.kv_set(f"cluster_exit:{token}", True)
+                    names = ", ".join(escape(b["label"]) for b in out[:8])
+                    await self.tg.alert(
+                        f"<b>⚠️ SMART MONEY STEIGT AUS – ${escape(m['symbol'])}</b>\n"
+                        f"{len(out)} von {len(buyers)} Wallets sind komplett raus: {names}\n"
+                        f"MCap jetzt {usd(m['mcap'])} · {links(chain, token, m)}\n"
+                        "<i>Wenn du drin bist: Gewinne sichern oder Stop-Loss enger ziehen.</i>")
+                    return
+            if self.cfg.get("sell_alerts"):
+                await self.tg.send(
+                    f"📤 <b>{escape(label)}</b> verkauft ${escape(m['symbol'])} ≈ {usd(value)}"
+                    + (" (komplett raus)" if closed else "") + f" · MCap {usd(m['mcap'])}")
 
+    async def _single(self, chain, wallet, label, token, m, value, new_position, n, need):
+        mode = self.cfg.get("single_alerts", "private")
+        if mode == "off":
+            return
+        last = self.db.kv_get(f"wsingle:{token}", 0)
+        if time.time() - last < 1200:   # pro Coin max. alle 20 Min eine Einzelmeldung
+            return
+        self.db.kv_set(f"wsingle:{token}", time.time())
+        sec = await self.sec.check(chain, token, m["pair"])
+        if not sec.passed and not self.cfg.get("alert_on_unsafe", True):
+            return
+        verdict, _ = quick_verdict(sec, m, self.s)
         lines = [
-            f"<b>{title}</b>",
-            f"👛 <b>{escape(label)}</b> <code>{wallet[:6]}…{wallet[-4:]}</code> · {CHAINS[chain]['name']}",
-            "",
-            f"<b>{escape(m['name'])}</b> (${escape(m['symbol'])})",
+            f"<b>🐋 {escape(label)} kauft</b>" + (" (neue Position)" if new_position else ""),
+            f"<b>{escape(m['name'])}</b> (${escape(m['symbol'])}) · {CHAINS[chain]['name']} · ≈ <b>{usd(value)}</b>",
             f"<code>{token}</code>",
-            f"Menge: {amount:,.0f} ≈ <b>{usd(value)}</b>",
-            f"💰 Preis {price(m['price'])} · MCap {usd(m['mcap'])} · Liq {usd(m['liquidity'])} · Alter {age(m['age_min'])}",
+            f"💰 MCap {usd(m['mcap'])} · Liq {usd(m['liquidity'])} · Alter {age(m['age_min'])} · 1h {m['chg_1h']:+.0f}%",
+            f"👥 Smart Money drin: <b>{n}</b>/{need} (ab {need} kommt ein Call mit KI-Meinung)",
+            "", verdict, "", links(chain, token, m),
         ]
-        if verdict:
-            lines += ["", verdict]
-        lines += ["", links(chain, token, m)]
-        await self.tg.alert("\n".join(lines))
+        text = "\n".join(lines)
+        await (self.tg.alert(text) if mode == "channel" else self.tg.send(text))
+
+    async def cluster_call(self, chain, token, pair, buyers, first=True):
+        """Mehrere Smart-Money-Wallets im selben Coin -> Call (immer), mit ehrlicher Einschätzung."""
+        from .fmt import coin_message
+        holding = [b for b in buyers if not b["exited"]]
+        n = len(holding)
+        ev = await self.scanner.evaluate(chain, token, f"Smart Money: {n} Wallets", pair=pair, force_ai=True,
+                                         extra={"smart_money_kaeufer": [
+                                             {"name": b["label"], "usd": round(b["usd"]), "einstieg_mcap": b["entry_mcap"],
+                                              "vor_min": round((time.time() - b["ts"]) / 60)} for b in buyers]})
+        m = ev.metrics
+        verdict, ok = quick_verdict(ev.security, m, self.s, ev=ev, buyers=holding)
+        entry = min((b["entry_mcap"] for b in holding if b["entry_mcap"]), default=None)
+        blines = [f"• <b>{escape(b['label'])}</b> {usd(b['usd'])} bei MC {usd(b['entry_mcap'])} "
+                  f"({(time.time() - b['ts']) / 60:.0f} min her){' – schon raus' if b['exited'] else ''}"
+                  for b in buyers[:12]]
+        head = (f"🐋 SMART-MONEY-CALL – {n} Wallets kaufen" if first else f"🐋 SMART MONEY: jetzt {n} Wallets drin")
+        body = coin_message(ev, header=head)
+        extra = ["", "<b>👥 Wer ist drin:</b>"] + blines
+        if entry:
+            extra.append(f"Erster Einstieg bei MC {usd(entry)} → jetzt {usd(m['mcap'])} ({m['mcap'] / entry:.1f}x)")
+        extra += ["", f"<b>🧭 Meine Meinung:</b> {verdict}"]
+        # Meinung + Wallets direkt unter die Kopfzeile setzen
+        top, rest = body.split("\n", 1)
+        await self.tg.alert(top + "\n" + "\n".join(extra) + "\n" + rest)
+        if first and not (ev.security and ev.security.fatal):
+            self.db.add_call(chain, token, m, ev.total, f"Smart Money ({n})", f"{n} Wallets")
+            self.db.mark(chain, token, "alerted", f"Smart Money {n} Wallets")
+
+
+def quick_verdict(sec, m, s, ev=None, buyers=None) -> tuple[str, bool]:
+    """Kurze, ehrliche Einschätzung: lohnt sich ein Einstieg?"""
+    if sec is None:
+        return "❔ Konnte die Sicherheit nicht prüfen – Finger weg, bis es klappt.", False
+    if sec.fatal:
+        return "⛔ <b>FINGER WEG</b> – " + escape("; ".join(sec.hard_fails[:3])) + \
+            ". Auch Profis kaufen manchmal Fallen oder spielen bewusst nur Sekunden-Trades.", False
+    if not sec.passed:
+        return "⚠️ <b>Riskant</b> – " + escape("; ".join(sec.hard_fails[:3])) + \
+            ". Wenn überhaupt, nur Mini-Einsatz.", False
+    probs = []
+    entry = min((b["entry_mcap"] for b in (buyers or []) if b.get("entry_mcap")), default=None)
+    if entry and m["mcap"] > entry * 2.5:
+        probs.append(f"du wärst spät dran (schon {m['mcap'] / entry:.1f}x seit dem ersten Wallet-Kauf)")
+    if m["chg_5m"] > 25:
+        probs.append(f"gerade +{m['chg_5m']:.0f} % in 5 min – auf Rücksetzer warten")
+    if m["liquidity"] < 15000:
+        probs.append("wenig Liquidität – schwer wieder rauszukommen")
+    if m["mcap"] > 3_000_000:
+        probs.append("Market Cap schon hoch – weniger Luft nach oben")
+    score = ev.total if ev else None
+    if not probs and (score is None or score >= s.get("min_score", default=65) - 5):
+        return ("✅ <b>Einstieg vertretbar</b> – Sicherheit ok, Smart Money ist drin. "
+                "Klein einsteigen, bei 2x den Einsatz rausnehmen, Stop-Loss bei −50 %."), True
+    if not probs:
+        probs.append(f"Gesamt-Score nur {score}/100")
+    return "🟡 <b>Nur mit kleinem Einsatz / abwarten</b> – " + escape("; ".join(probs)) + ".", False

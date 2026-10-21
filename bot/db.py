@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS mentions (
     addr TEXT, source TEXT, place TEXT, ts REAL, weight REAL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_mentions ON mentions(addr, ts);
+CREATE TABLE IF NOT EXISTS wallet_trades (
+    chain TEXT, token TEXT, wallet TEXT, label TEXT, ts REAL, dir TEXT, usd REAL, mcap REAL, closed INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_wtrades ON wallet_trades(token, ts);
 """
 
 
@@ -101,6 +105,7 @@ class DB:
         self.con.execute("DELETE FROM wallet_seen WHERE ts < ?", (time.time() - 30 * 86400,))
         self.con.execute("DELETE FROM ai_calls WHERE ts < ?", (time.time() - 86400,))
         self.con.execute("DELETE FROM mentions WHERE ts < ?", (time.time() - 3 * 86400,))
+        self.con.execute("DELETE FROM wallet_trades WHERE ts < ?", (time.time() - 14 * 86400,))
         self.con.commit()
 
     # ---------- Calls (gemeldete Coins + Performance) ----------
@@ -149,6 +154,29 @@ class DB:
         return self.con.execute(
             "SELECT addr, COUNT(*) n, COUNT(DISTINCT place) places FROM mentions WHERE ts>? "
             "GROUP BY addr ORDER BY places DESC, n DESC LIMIT ?", (time.time() - minutes * 60, limit)).fetchall()
+
+    # ---------- Smart-Money-Trades ----------
+    def add_wallet_trade(self, chain, token, wallet, label, direction, usd, mcap, closed=False):
+        self.con.execute("INSERT INTO wallet_trades VALUES(?,?,?,?,?,?,?,?,?)",
+                         (chain, token, wallet, label, time.time(), direction, usd, mcap, int(closed)))
+        self.con.commit()
+
+    def wallet_buyers(self, token, hours=12):
+        """Verschiedene beobachtete Wallets, die den Coin im Zeitfenster gekauft haben (+ ob schon raus)."""
+        rows = self.con.execute(
+            "SELECT label, wallet, MIN(ts) first_ts, SUM(CASE WHEN dir='in' THEN usd ELSE 0 END) usd, "
+            "MIN(CASE WHEN dir='in' THEN mcap END) entry_mcap, "
+            "MAX(CASE WHEN dir='out' AND closed=1 THEN ts ELSE 0 END) exit_ts, "
+            "MAX(CASE WHEN dir='in' THEN ts ELSE 0 END) last_buy "
+            "FROM wallet_trades WHERE token=? AND ts>? GROUP BY label ORDER BY first_ts",
+            (token, time.time() - hours * 3600)).fetchall()
+        out = []
+        for r in rows:
+            if not r["last_buy"]:
+                continue  # nur verkauft, nie gekauft (im Zeitfenster)
+            out.append({"label": r["label"], "wallet": r["wallet"], "ts": r["first_ts"], "usd": r["usd"] or 0,
+                        "entry_mcap": r["entry_mcap"], "exited": r["exit_ts"] > r["last_buy"]})
+        return out
 
     # ---------- Wallets ----------
     def add_wallet(self, chain, address, label):

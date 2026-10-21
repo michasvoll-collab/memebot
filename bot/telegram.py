@@ -67,6 +67,7 @@ class Telegram:
             ("watch", "Wallet beobachten: /watch <adresse> [name]"),
             ("unwatch", "Wallet entfernen: /unwatch <adresse|name>"),
             ("wallets", "Beobachtete Wallets anzeigen"),
+            ("smart", "Was kauft Smart Money gerade"),
             ("calls", "Bisherige Calls mit Hoch & x-Faktor"),
             ("bilanz", "Gewinn/Verlust-Rechnung aller Calls"),
             ("ki_test", "KI-Analyse prüfen"),

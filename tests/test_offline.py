@@ -206,6 +206,11 @@ async def main():
     calls.append("evm_wallet_round"); calls.append("sol_wallet_round")
     print("\n--- Wallet-Runde 2 (Meldungen erwartet) ---")
     await app.wallets.run_cycle()
+    assert app.db.kv_get(f"cluster:{SOL_GOOD}", 0) >= 4, "Smart-Money-Call fehlt"
+    from bot.wallets import quick_verdict
+    hp = await app.security.check("base", EVM_HONEY, "")
+    assert "FINGER WEG" in quick_verdict(hp, {}, app.s)[0]
+    print(m.strip_html(app.smart_text())[:300])
 
     # 4) Manuelle Prüfung
     txt = await app.check_text(EVM_HONEY)

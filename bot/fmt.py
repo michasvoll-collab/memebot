@@ -98,12 +98,15 @@ def coin_message(ev, header="🚀 NEUER COIN – alle Kriterien erfüllt", is_ca
     if ev.market_fails:
         lines += ["", "📉 Markt-Kriterien nicht erfüllt:"] + ["• " + escape(x) for x in ev.market_fails[:6]]
     hx, ht = getattr(ev, "x", {}) or {}, getattr(ev, "tgb", {}) or {}
-    if hx or ht:
+    if hx or ht or getattr(ev, "smart", None):
         lines.append("")
     if hx:
         lines.append(f"🐦 X letzte Stunde: <b>{hx.get('tweets', 0)}{'+' if hx.get('full') else ''} Posts</b> von "
                      f"{hx.get('accounts', 0)} Accounts · Reichweite {usd(hx.get('reach', 0))[1:]}"
                      + (f"\n   Große Accounts: {escape(', '.join(hx['big']))}" if hx.get("big") else ""))
+    sm = getattr(ev, "smart", []) or []
+    if sm:
+        lines.append(f"🐋 Smart Money drin: <b>{len(sm)}</b> ({escape(', '.join(b['label'] for b in sm[:5]))})")
     if ht:
         lines.append(f"✈️ Telegram letzte Stunde: <b>{ht.get('places', 0)} Kanäle</b>, {ht.get('n', 0)} Erwähnungen")
     if ev.trend:

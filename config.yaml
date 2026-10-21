@@ -80,11 +80,60 @@ source_penalty:
 # Wallet-Tracking
 # ------------------------------------------------------------
 wallets:
-  poll_interval_sec: 60
-  # Auch Wallet-Käufe melden, die die Sicherheits-Checks NICHT bestehen?
-  # (Du bekommst dann eine Warnung mit dazu.)
+  poll_interval_sec: 60           # Solana-Wallets
+  evm_interval_sec: 300           # EVM-Wallets (Ethereum/Base/BSC/Arbitrum) – seltener, schont die Limits
   alert_on_unsafe: true
-  min_buy_usd: 100                # kleinere Käufe ignorieren (Spam / Airdrops)
+  min_buy_usd: 300                # kleinere Käufe ignorieren (Spam / Airdrops)
+  single_alerts: private          # einzelne Wallet-Käufe: private | channel | off
+  sell_alerts: false              # einzelne Verkäufe melden?
+  cluster_min_wallets: 4          # ab so vielen Wallets im selben Coin -> SMART-MONEY-CALL in den Kanal
+  cluster_hours: 12               # Zeitfenster dafür
+  # Smart-Money-Wallets: [Name, Solana, EVM] – sortiert nach Volumen
+  list:
+    - ["@rasmr", "6F7GEcDQQRBygxJy9KumtPTC58CRMq5ThT2iFibeRrPs", "0xc4db4c15b7a4005bb0bfc9d78d5688c6bf3a695b"]
+    - ["@pointfarmcap", "6cerGpSGzCrA1NeHUNtyoNm4rWQx5SnK3DSAXb4e615t", "0x2c56846e43eb73d39c5d3791f8ff1e02f10ba596"]
+    - ["@loganlim_x", "G6fVwGmPYym5r9rdEEMxP53hJjG1k7kSeTeyYzDTvHWm", "0x2272d6774063a6753d603755a691732ea2371125"]
+    - ["@Aurelius0121", "2cYqR4qG4ebyghAc3jc8PCALNh1bHL4hYewmmkr3Jawq", "0x134cea2c8b270819320b73169d27bbf62f4d3ce2"]
+    - ["@ether_monk", "Gt6MM3JA2HeJRU7x6tp5yUBVZrTFeMscs6S5gg8BpRqd", "0x659262bf822053f9ba5abca9d8f6a5954f9d6a7d"]
+    - ["@insentos", "HhmfcvHRXLzh7FCHdpc2zN9yVV6ZWGWM3XHYM1HDjHDK", "0xb41b607b67cbcc12be0dfa4faa7465a8ddf631bd"]
+    - ["@Mudo9453", "6okp84Cd9iyzYPETMf7sALJNrTVr2GkgF7MoAj1Hecqd", "0xdb1a4ab202bb30e32690013a57614e6a1d48889c"]
+    - ["@bystevenr", "3uuvQQNY8YjwK64M5A26Q8yM4xS31PueM7hq3db1LAUq", "0xa393b9ff89f4b9fbaddc2d0acaf0f578a567a151"]
+    - ["@orangie", "4jf24uqj5tAtmXaHCiA1nbYH2RcF21RMdAv1BJdRv3V7", "0x3624da608227176d8d61108f550a0ddb167d7d39"]
+    - ["@DipWheeler", "HYmWmpbJbjzsSGu19qBKBjBaXrSrFiGzX3EFtaoPos9F", "0xe40101597f4a03ebdca38f7a08eefd1dc941d058"]
+    - ["@crypt_omar", "AFkR8tvrCnkkHQKeRQWmjrKKsCjfYL818VqnjvQGLyhc", "0xbd332a029f74111b44797ab979b0438af69f3bd7"]
+    - ["@Numerooo0", "9mXFLKcwawrpj98xaUnrTaGsyXSxeyj9RGNgkgbJhvWR", "0x576a47ded64002d09d38bc5badcb4c38902c09c9"]
+    - ["@brezscales", "EPi2uGDEgKYfgVPX2TaoeKveiJ9YyUZtUJmWpFX4uLgf", "0x6e939ca341be874c8ccae99520b2daaa0815387a"]
+    - ["@tjr", "9pqU4RsjnPLAMSg4yv4SvDg6NZy6qoAsFFQ3K84DBoqZ", "0xac75048e2cf75a6581e40f7ef1b0cf1dfcd212f7"]
+    - ["@Gofastt100x", "9Mfw1b6ZxaGVRc5WLQCUmdMFAEFYTDNnXqHAy8dMyKzZ", "0x0d47682b3c24d602bd572c58b20b8781a674e54e"]
+    - ["@0xAvast", "F69rpud3jENtWWfQBprczzEbwGGpEwsJNgE4GNn8SPiR", "0xa8413e9fc46db955855de9107135beae47f6c58e"]
+    - ["@NinjaTradeCr", "5wwzTNGy7eQciorj2yra6Dj8jkzMha4nQGEDpVm5aTos", "0x6b0251ab70f3116ffef04425f5e8c56bd12b332e"]
+    - ["@PoorGoat_", "HXCYBexdXRrNTa3NHHJiKh5wsjb6zfW79MxQYGsszouu", "0xee368a44d334ab499b25efabbc879548d7be4143"]
+    - ["@kederrac", "6QBBrfWRyo6ot2icYu2LSt7UXdMEpCkED3xeQGR9Hc2E", "0xda92d83e0410c0a6eec0978d8180fc7823ffa8ce"]
+    - ["@fz7", "BjCCqdjK6WumFDhtfvup3RnS6jvL7MBJzbHPL89RCByB", "0x1c906f9ea55e377674cbacbd3a5c07a157390f21"]
+    - ["@beryoza", "AUt4G9LRzEpPn2x6uaQisB42boj31KCpwZNewfoTC4vE", "0x170e0c4c038a227dac0d130c8740d8f8ade19d87"]
+    - ["@Psyxology_", "29Wv2ASpsKe6AUiYmNeN86snEX2GoWcMeNSsjFp3i9co", "0x2de6f290f942fed4cd22388a0df0d70412c0a24a"]
+    - ["@Washedupke3d", "9QVGCcSrG9jFaN2TZxfwR5hy5hWm7inKh7xC1tv5UTyW", "0x9f24fab094683047e12e40c41b8a13837a3c26f3"]
+    - ["@Tom100Bi", "3vC23Wbkw5oA1HWKDHE6Nq9ZhW7varTUYEKmSuVmdkGi", "0x76c12dfbe40feb324a4ba5e65050e03eb4c2e4bb"]
+    - ["@Bprintingg", "Fh4GjSPu36og9KnmuhxShLnspWeXXWjvb2oKs5XNJMsa", "0x13b2d66df9e3d188b6f1479bfbb692516587f49a"]
+    - ["@Qr1012", "182KSAiwe4gNYrvxJvAM4F3YKjGEqMLURK6fDMQucVh", "0x166ba08a63eb9313a2885827cb6b48cfd0f4e8e7"]
+    - ["@SkinnyLizardSlinger", "Ha16zjzir7dWpJ3gRL6WA2sujXBUbZkaP8RNMMViyp5e", "0xf7004170775158047d3283b1da90da664cb2dae8"]
+    - ["@premiumape79628", "4ZnWd9s2nrc4VH22YZ9x6otfUQeHkNJcLSXpJvV9fbMP", "0xfb143f34196288dfeae1de426aec952f04eeb5e7"]
+    - ["@GerardGamba", "BDSmCWZrXnkgose1xVnLoRQhoJr9fgX4BVnoC7JA2ZBb", "0x90f999a217763da08226b3f800056a304da6e3dd"]
+    - ["@LYON1", "CpxZF9A6af953ey8VAqVH9Uthd7aUTScQPXfzzooj74H", "0x44f0914e5f7ab0637fb24af156a05a4ef9c3006f"]
+    - ["@VeryAliveOrca", "6zGKEGTpSukhZwLgB9bvJMs4H5bTWxe5cwnQTHbCdwk8", "0x616f13f45665962dd1eb5b8e2e5eb0e37fbace70"]
+    - ["@green0x", "BHsS9EpDM6XUbVr7whNF2QwXNhkf94ZHeT8QBoZLDb9m", "0xf53867b830afcaf9a639973dba5d98c2e72c2dd7"]
+    - ["@hotronixs", "HxA64vkdUfbAiHb2nBaW2YFiTMwZevUcxNsxG9iATucY", "0x0f9cda3ae597adccab73b13bdc44ffa7b274bb8c"]
+    - ["@WaitForTheMoment", "6ntcB31ZE1fCZHumTutyjVACETBkWw9q4tU8RyKP6gor", "0xe258523d47d77f64c593980a82672736fe8adb7a"]
+    - ["@user_828282", "9da8gdv6eUj47S3RgcresYM4JKr6QqZZ9rGdo8iknzhm", "0x4ef536026f61b163d832a480a16a051293353c33"]
+    - ["@nickyboi4", "9iVEinbWEUzqjy1siXrbcAFbBzFJxcghusCYtuqNq1DK", "0x1955bad8590239ea85935a8bfbcba488c0ed7836"]
+    - ["@road_to_10kk", "6bBz4KwnSBSgvMSUy8DLssBphqkQ6x3Pb4HJNHgdwBiC", "0x5704e96128c5ffdfc35ae801f7c298976e32f171"]
+    - ["@hyperliquid_cat", "5JbPUcPLEWRkBhxKu3xyGZ2Dafw5npooxa7UNoDxbwAs", "0x7f021178e29ac49eaa91966e6e1e91bbd5115a86"]
+    - ["@anthonydolla", "jFtnG555eiXKkBkq1bJZaXeYV8H6zxr7bPkzEwe4x1z", "0x20abc4a337cd228625d42cfacd8fb79de3871de9"]
+    - ["@MoneyPrinter247", "6x6gMu4huoms7kKML1L4AKuFQsqoN76bFTobFU4dCEt5", "0x8f1fd6b129d73f5f55116b3ec9fc3b6429a1188e"]
+    - ["@exigent", "DegKdKYkUtdaeyAabNYLFCzC6B8dtBM6A7mTREUfQEyc", "0x7379649b5b9cf178db8a8d9e60684ac91e24b83c"]
+    - ["@ratwell", "DvEozweUs38dfFC2TZYPDS1MqMYXj7FT6xbsK6cqpeNe", "0x37993b5ac6166cc5004f21e24ab59014a1716dac"]
+    - ["@privatloot", "2QMw7F6Hg4c4EbNnr43y6m76nSyp2oLKcc1muu1vUNGG", "0xa3c51e45e91612fb7928bace5a87c59bcb6a902c"]
+    - ["@Slingoor", "GCexn2NbiNXRBTyTUBEUDREHYvj1xFjg9TjD21iuFiyY", "0x75824a5afa52eaffc4f481aa32fdd0fa7308f075"]
 
 # ------------------------------------------------------------
 # Call-Tracking (MC beim Call, Hoch danach, x-Faktor)

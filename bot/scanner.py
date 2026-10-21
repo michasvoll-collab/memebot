@@ -32,6 +32,7 @@ class Evaluation:
     found: bool = True
     x: dict = field(default_factory=dict)      # X/Twitter-Buzz
     tgb: dict = field(default_factory=dict)    # Telegram-Erwähnungen
+    smart: list = field(default_factory=list)  # beobachtete Wallets, die drin sind
 
     @property
     def criteria_ok(self) -> bool:
@@ -93,7 +94,7 @@ class Scanner:
         return w.get("security", 0.35), w.get("market", 0.25), w.get("hype", 0.40)
 
     # ---------- komplette Bewertung eines Coins ----------
-    async def evaluate(self, chain, address, source, pair=None, deep=True, force_ai=False) -> Evaluation:
+    async def evaluate(self, chain, address, source, pair=None, deep=True, force_ai=False, extra=None) -> Evaluation:
         ev = Evaluation(chain, address, source)
         pair = pair or await self.market.pair_for_token(chain, address)
         if not pair:
@@ -121,6 +122,9 @@ class Scanner:
             hype += 0.5 * ev.x.get("score", 0) + 0.4 * ev.tgb.get("score", 0)
             if source.startswith(HYPE_SOURCES):
                 hype += 10
+            ev.smart = [b for b in self.db.wallet_buyers(address, self.s.get("wallets", "cluster_hours", default=12))
+                        if not b["exited"]]
+            hype += min(30, 8 * len(ev.smart))   # Smart-Money-Wallets drin = starkes Signal
             ev.news = await self.news.news_for(m["name"]) if self.news else []
             if ev.news:
                 hype += 8
@@ -134,10 +138,12 @@ class Scanner:
         if ai_ok and self.ai.enabled:
             hit = self.ai_cache.get(address)
             ttl = self.s.get("ai", "cache_minutes", default=180) * 60
-            if hit and time.time() - hit[0] < ttl:
+            if hit and not extra and time.time() - hit[0] < ttl:
                 ev.ai_text, ai_hype = hit[1], hit[2]
             else:
-                ev.ai_text, ai_hype = await self.ai.analyze_coin(self._ctx(ev, m, source))
+                ctx = self._ctx(ev, m, source)
+                ctx.update(extra or {})
+                ev.ai_text, ai_hype = await self.ai.analyze_coin(ctx)
                 if ev.ai_text:
                     self.ai_cache[address] = (time.time(), ev.ai_text, ai_hype)
             if ai_hype is not None:

@@ -18,6 +18,7 @@ HOST_INTERVAL = {
     "api.honeypot.is": 0.5,
     "api.etherscan.io": 0.25,
     "news.google.com": 1.0,
+    "api.mainnet-beta.solana.com": 0.35,   # öffentlicher RPC: ~40 Anfragen/10 s
 }
 DEFAULT_INTERVAL = 0.2
 

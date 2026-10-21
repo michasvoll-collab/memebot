@@ -35,7 +35,8 @@ HELP = """<b>🤖 MemeBot – Befehle</b>
 /check &lt;adresse&gt; – Coin sofort komplett prüfen (Honeypot, Rug, Markt, Hype, KI)
 /watch &lt;adresse&gt; [name] – Wallet beobachten (Solana oder 0x… für alle EVM-Chains)
 /unwatch &lt;adresse|name&gt; – Wallet entfernen
-/wallets – beobachtete Wallets
+/wallets – beobachtete Wallets · /smart – was kauft Smart Money gerade
+/sol_rpc &lt;url&gt; – eigener Solana-Zugang (z. B. Helius, kostenlos) für schnelleres Wallet-Tracking
 /calls – alle bisherigen Calls: MC beim Call, Allzeithoch danach, x-Faktor
 /bilanz [einsatz] – was wäre aus deinem Geld geworden (3 Verkaufs-Strategien)
 /ki_test – prüft die KI · /ki_key sk-ant-… – neuen Claude-Schlüssel setzen
@@ -62,7 +63,7 @@ Du kannst mir auch einfach eine Coin-Adresse schicken."""
 
 
 
-SECRET_CMDS = ("/ki_key", "/x_key", "/tg_api", "/tg_login", "/tg_code", "/tg_pw")
+SECRET_CMDS = ("/sol_rpc", "/ki_key", "/x_key", "/tg_api", "/tg_login", "/tg_code", "/tg_pw")
 
 
 class App:
@@ -87,6 +88,11 @@ class App:
         self.scanner = Scanner(self.s, self.db, self.market, self.security, self.news, self.ai, self.tg,
                                self.xhype, self.tghype)
         self.wallets = WalletTracker(self.http, self.s, self.db, self.market, self.security, self.tg, self.scanner)
+        if self.db.kv_get("sol_rpc"):
+            self.s.solana_rpc = self.db.kv_get("sol_rpc")
+        n = self.wallets.import_list()
+        if n:
+            log.info("%d Wallets aus der Liste übernommen", n)
         self.tracker = CallTracker(self.http, self.s, self.db, self.market, self.tg)
         self.started = time.time()
 
@@ -242,10 +248,21 @@ class App:
             ws = self.db.wallets()
             if not ws:
                 return await self.tg.send("Noch keine Wallets. Füge eine hinzu mit /watch &lt;adresse&gt; [name]")
-            lines = ["<b>👛 Beobachtete Wallets</b>"] + [
-                f"• <b>{escape(w['label'])}</b> ({'EVM' if w['chain'] == 'evm' else 'Solana'})\n  <code>{w['address']}</code>"
-                for w in ws]
+            people: dict[str, list] = {}
+            for w in ws:
+                people.setdefault(w["label"], []).append("SOL" if w["chain"] == "solana" else "EVM")
+            lines = [f"<b>👛 {len(people)} beobachtete Wallets</b> ({len(ws)} Adressen)", ""] + [
+                f"• {escape(k)} ({'+'.join(v)})" for k, v in people.items()]
+            lines.append("\nEntfernen: /unwatch &lt;name&gt; · Smart-Money-Coins: /smart")
             await self.tg.send("\n".join(lines))
+        elif cmd == "/smart":
+            await self.tg.send(self.smart_text())
+        elif cmd == "/sol_rpc":
+            if not args or not args[0].startswith("http"):
+                return await self.tg.send("So: /sol_rpc https://mainnet.helius-rpc.com/?api-key=… (Nachricht wird gelöscht)")
+            self.s.solana_rpc = args[0]
+            self.db.kv_set("sol_rpc", args[0])
+            await self.tg.send("✅ Eigener Solana-Zugang gespeichert – Wallets werden jetzt schneller und zuverlässiger geprüft.")
         elif cmd == "/ki_key":
             if not args or not args[0].startswith("sk-ant-"):
                 return await self.tg.send("So: /ki_key sk-ant-… (Nachricht wird danach automatisch gelöscht)")
@@ -338,6 +355,23 @@ class App:
             await self.tg.send("▶️ Coin-Alarme wieder aktiv.")
         else:
             await self.tg.send("Unbekannter Befehl. /hilfe")
+
+    def smart_text(self) -> str:
+        hours = self.s.get("wallets", "cluster_hours", default=12)
+        rows = self.db.con.execute(
+            "SELECT token, chain, COUNT(DISTINCT label) n FROM wallet_trades WHERE dir='in' AND ts>? "
+            "GROUP BY token ORDER BY n DESC LIMIT 12", (time.time() - hours * 3600,)).fetchall()
+        if not rows:
+            return f"Noch keine Smart-Money-Käufe in den letzten {hours} h."
+        lines = [f"<b>🐋 Smart Money – letzte {hours} h</b>", ""]
+        for r in rows:
+            b = self.db.wallet_buyers(r["token"], hours)
+            hold = [x for x in b if not x["exited"]]
+            tok = self.db.get_token(r["chain"], r["token"])
+            sym = (tok["symbol"] if tok and tok["symbol"] else r["token"][:6] + "…")
+            lines.append(f"• <b>{escape(sym)}</b> – {len(hold)} drin, {len(b) - len(hold)} raus: "
+                         f"{escape(', '.join(x['label'] for x in hold[:5]))}\n  <code>{r['token']}</code>")
+        return "\n".join(lines)
 
     async def safe(self, coro):
         try:
@@ -479,7 +513,8 @@ class App:
                            f"{', '.join(CHAINS[c]['name'] for c in self.s.chains)}.\n/hilfe für Befehle.")
         tasks = [
             self.loop("scan", self.scanner.run_cycle, self.s.get("scan_interval_sec", default=60)),
-            self.loop("wallets", self.wallets.run_cycle, self.s.get("wallets", "poll_interval_sec", default=60)),
+            self.loop("wallets-sol", self.wallets.run_solana, self.s.get("wallets", "poll_interval_sec", default=60)),
+            self.loop("wallets-evm", self.wallets.run_evm, self.s.get("wallets", "evm_interval_sec", default=300)),
             self.loop("news", self.news_job, self.s.get("news", "interval_min", default=20) * 60),
             self.loop("cleanup", self.housekeeping, 6 * 3600),
             self.loop("tracker", self.tracker.run_cycle, self.s.get("tracker", "interval_sec", default=90)),
