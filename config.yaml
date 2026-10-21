@@ -1,0 +1,178 @@
+# ============================================================
+#  MemeBot – Einstellungen
+#  Geheime Schlüssel (Telegram-Token, API-Keys) gehören in die
+#  Datei .env – NICHT hier rein.
+# ============================================================
+
+# Welche Blockchains beobachtet werden (einfach Zeilen löschen/auskommentieren)
+chains:
+  - solana
+  - ethereum
+  - base
+  - bsc
+  - arbitrum
+
+# Wie oft (Sekunden) nach neuen Coins gesucht wird
+scan_interval_sec: 45
+# Wie oft (Sekunden) noch nicht passende Coins erneut geprüft werden
+recheck_interval_sec: 180
+# Wie lange (Stunden) ein neuer Coin maximal beobachtet wird
+max_watch_hours: 24
+
+# ------------------------------------------------------------
+# Markt-Kriterien – ALLE müssen erfüllt sein
+# ------------------------------------------------------------
+market:
+  min_liquidity_usd: 15000        # genug Liquidität, damit du wieder rauskommst
+  max_liquidity_usd: 5000000
+  min_market_cap_usd: 30000
+  max_market_cap_usd: 250000      # Tag-1-Auswertung: über 250K stürzten 73 % ab
+  min_age_minutes: 30             # Tag 1: unter 30 min stürzten 77 % ab
+  max_age_hours: 72
+  min_volume_1h_usd: 10000
+  min_txns_1h: 50                 # Käufe + Verkäufe in der letzten Stunde
+  min_buy_sell_ratio_1h: 0.8      # Käufe / Verkäufe (unter 1 = mehr Verkäufe)
+  max_buy_sell_ratio_1h: 3.0      # mehr als 3x so viele Käufe = meist Bot-Volumen (Tag 1: 90 % abgestürzt)
+  max_price_rise_1h_pct: 200      # schon >200 % in 1h gepumpt = zu spät (Tag 1: 85 % abgestürzt)
+  max_price_drop_1h_pct: -40      # schon >40 % gefallen in 1h -> raus
+  # --- v5, aus der Auswertung von Tag 2 ---
+  max_turnover_1h: 4              # Volumen 1h > 4x Liquidität = Wash-Trading (46 % tot)
+  max_chg_5m_pct: 20              # gerade +20 % in 5 min = Spike, nicht hinterherkaufen (0 % schafften 2x)
+  min_chg_5m_pct: -15             # fällt gerade stark
+  min_age_minutes_hype: 10        # Coins aus X/Telegram-Hype dürfen schon ab 10 min gemeldet werden
+
+# ------------------------------------------------------------
+# Sicherheits-Kriterien (Honeypot / Rug Pull)
+# ------------------------------------------------------------
+security:
+  max_buy_tax_pct: 10
+  max_sell_tax_pct: 10
+  max_top10_holders_pct: 35       # Top-10-Wallets (ohne LP/Burn) dürfen max. so viel halten
+  max_single_holder_pct: 12
+  max_creator_pct: 5
+  min_lp_locked_pct: 80           # Liquidität muss zu min. 80 % gesperrt/verbrannt sein
+  require_renounced_or_no_mint: true   # EVM: Owner abgegeben ODER keine Mint-Funktion
+  require_open_source: true             # EVM: Vertrag muss verifiziert sein
+  solana_require_no_mint_authority: true
+  solana_require_no_freeze_authority: true
+  solana_max_rugcheck_score: 1000       # RugCheck-Risiko-Score (niedriger = sicherer)
+  max_insiders: 20                      # ab 20 Insider-/Bundle-Wallets: kein Call (Tag 2: -16 %)
+  max_dev_tokens: 5                     # Ersteller hat schon 5+ Coins gemacht -> Abzug
+
+# Mindest-Gesamtpunktzahl (0–100) für einen Alarm
+min_score: 65
+# Mindest-Markt-Punkte (Tag 2: unter 70 lief es deutlich schlechter)
+min_market_score: 70
+# Gewichtung der Gesamtpunkte – Hype zählt am meisten
+score_weights:
+  security: 0.35
+  market: 0.25
+  hype: 0.40
+# Coin muss nach so vielen Minuten IMMER NOCH alles erfüllen, bevor er gemeldet wird
+confirm_minutes: 15
+# Ab diesem Hype-Wert wird sofort gemeldet (keine Wartezeit) -> "⚡ HYPE-CALL"
+fast_lane_hype: 80
+# Punktabzug je nach Fundort (Tag 2: "DexScreener neu" nur 8 % Treffer)
+source_penalty:
+  DexScreener neu: 8
+
+# ------------------------------------------------------------
+# Wallet-Tracking
+# ------------------------------------------------------------
+wallets:
+  poll_interval_sec: 60
+  # Auch Wallet-Käufe melden, die die Sicherheits-Checks NICHT bestehen?
+  # (Du bekommst dann eine Warnung mit dazu.)
+  alert_on_unsafe: true
+  min_buy_usd: 100                # kleinere Käufe ignorieren (Spam / Airdrops)
+
+# ------------------------------------------------------------
+# Call-Tracking (MC beim Call, Hoch danach, x-Faktor)
+# ------------------------------------------------------------
+tracker:
+  interval_sec: 90        # wie oft die Preise gemeldeter Coins geprüft werden
+  track_days: 14          # wie lange ein Call verfolgt wird
+  # Meldungen bei 2x, 3x, 5x, 10x, 20x, 50x, 100x kommen automatisch
+
+# ------------------------------------------------------------
+# News & Hype
+# ------------------------------------------------------------
+news:
+  enabled: true
+  interval_min: 10
+  # Kurzer Trend-Überblick per Telegram (0 = aus)
+  digest_every_hours: 6
+  feeds:
+    - https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en
+    - https://cointelegraph.com/rss
+    - https://www.coindesk.com/arc/outboundfeeds/rss/
+    - https://decrypt.co/feed
+    - https://news.google.com/rss/headlines/section/topic/NATION?hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/search?q=Trump+when:1d&hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/search?q=Elon+Musk+when:1d&hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/search?q=memecoin+OR+%22meme+coin%22+when:1d&hl=en-US&gl=US&ceid=US:en
+    - https://news.google.com/rss/search?q=viral+when:1d&hl=en-US&gl=US&ceid=US:en
+
+# ------------------------------------------------------------
+# KI-Analyse (Claude)
+# ------------------------------------------------------------
+ai:
+  enabled: true
+  analysis_model: claude-haiku-5-5    # günstig; für bessere Texte: claude-sonnet-5-5
+  trend_model: claude-haiku-5-5       # günstig: extrahiert Trend-Stichwörter aus News
+  web_search: true                    # Claude darf selbst im Web/X nach dem Coin suchen
+  web_search_max_uses: 2
+  max_analyses_per_hour: 10           # Kostenbremse Coin-Analysen
+  max_trend_calls_per_hour: 6         # News-Trends
+  max_x_calls_per_hour: 12            # Stichwörter aus Promi-Posts
+  cache_minutes: 180                  # gleiche Coin-Analyse nicht doppelt bezahlen
+
+# ------------------------------------------------------------
+# X / Twitter (twitterapi.io – Schlüssel per /x_key im Bot)
+# ------------------------------------------------------------
+x:
+  enabled: true
+  interval_sec: 180          # wie oft die Promi-/KOL-Accounts gelesen werden
+  buzz_pages: 1              # 1 Seite = bis 20 Posts pro Coin-Messung
+  max_coin_age_hours: 6      # nur frische Coins zu Promi-Posts suchen
+  accounts:                  # ändern mit /set x.accounts name1,name2,...
+    - realDonaldTrump
+    - POTUS
+    - WhiteHouse
+    - DonaldJTrumpJr
+    - EricTrump
+    - MELANIATRUMP
+    - JDVance
+    - elonmusk
+    - cz_binance
+    - heyibinance
+    - VitalikButerin
+    - saylor
+    - aeyakovenko
+    - a1lon9
+    - pumpdotfun
+    - jessepollak
+    - base
+    - solana
+    - binance
+    - coinbase
+    - dexscreener
+    - blknoiz06
+    - MustStopMurad
+    - frankdegods
+    - notthreadguy
+    - KookCapitalLLC
+    - Cented7
+    - theunipcs
+    - cobie
+    - kanyewest
+    - MrBeast
+
+# ------------------------------------------------------------
+# Telegram-Mitlesen (Zweit-Account, Einrichtung per /tg_login)
+# ------------------------------------------------------------
+telegram_hype:
+  channels: []               # öffentliche Kanäle, denen automatisch beigetreten wird, z. B. @kanalname
