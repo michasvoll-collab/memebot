@@ -82,6 +82,7 @@ class Telegram:
             ("set", "Einstellung ändern: /set name wert"),
             ("update", "Neueste Version laden"),
             ("status", "Bot-Status"),
+            ("debug", "Diagnose: warum (k)ein Call"),
             ("kanal_aus", "Alarme wieder nur privat"),
             ("pause", "Coin-Alarme pausieren"),
             ("resume", "Coin-Alarme fortsetzen"),

@@ -67,14 +67,29 @@ class DB:
         return cur.rowcount > 0
 
     def due_candidates(self, recheck_sec, max_age_sec, limit=60):
+        """Fällige Coins – zuerst: in Bestätigung, gerade erwähnt (bump), dann die neuesten."""
         now = time.time()
         self.con.execute(
             "UPDATE tokens SET status='rejected', reason=COALESCE(reason,'')||' | Zeitlimit' "
             "WHERE status='pending' AND first_seen < ?", (now - max_age_sec,))
         self.con.commit()
         return self.con.execute(
-            "SELECT * FROM tokens WHERE status='pending' AND last_check < ? ORDER BY last_check ASC LIMIT ?",
-            (now - recheck_sec, limit)).fetchall()
+            "SELECT * FROM tokens WHERE status='pending' AND (last_check < ? OR "
+            "(passed_at IS NOT NULL AND last_check < ?)) "
+            "ORDER BY (passed_at IS NOT NULL) DESC, (last_check = 0) DESC, first_seen DESC LIMIT ?",
+            (now - recheck_sec, now - 120, limit)).fetchall()
+
+    def reason_stats(self, hours=3, limit=12):
+        """Warum werden Coins gerade nicht gemeldet? (häufigste Gründe)"""
+        rows = self.con.execute(
+            "SELECT reason FROM tokens WHERE last_check > ? AND status != 'alerted'",
+            (time.time() - hours * 3600,)).fetchall()
+        cnt: dict[str, int] = {}
+        for r in rows:
+            for part in (r["reason"] or "?").split(";"):
+                key = part.strip().split("(")[0].split(" | ")[0].strip()[:60] or "?"
+                cnt[key] = cnt.get(key, 0) + 1
+        return sorted(cnt.items(), key=lambda x: -x[1])[:limit], len(rows)
 
     def mark(self, chain, address, status, reason=""):
         self.con.execute("UPDATE tokens SET status=?, reason=?, last_check=? WHERE chain=? AND address=?",

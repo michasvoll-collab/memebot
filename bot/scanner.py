@@ -177,7 +177,8 @@ class Scanner:
         found = await self.market.discover()
         await self.add_candidates(found)
         due = self.db.due_candidates(self.s.get("recheck_interval_sec", default=300),
-                                     self.s.get("max_watch_hours", default=24) * 3600)
+                                     self.s.get("max_watch_hours", default=24) * 3600,
+                                     self.s.get("batch_per_cycle", default=150))
         by_chain: dict[str, list] = {}
         for row in due:
             by_chain.setdefault(row["chain"], []).append(row)
@@ -209,7 +210,10 @@ class Scanner:
         self.db.con.execute("UPDATE tokens SET symbol=? WHERE chain=? AND address=?", (m["symbol"], chain, addr))
         fails = check_market(m, self.market_cfg(source))
         if fails:
-            fatal = any(f.startswith(FATAL_MARKET) for f in fails)
+            age = m["age_min"] or 0
+            hopeless = ((m["liquidity"] < 3000 and age > 60) or (m["vol_1h"] < 1000 and age > 120)
+                        or (m["mcap"] < 10000 and age > 180))
+            fatal = hopeless or any(f.startswith(FATAL_MARKET) for f in fails)
             self.db.mark(chain, addr, "rejected" if fatal else "pending", "; ".join(fails))
             self.db.set_passed(chain, addr, None)
             return

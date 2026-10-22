@@ -66,6 +66,11 @@ RSS = """<rss><channel>
 calls = []
 
 
+def sol_wallets():
+    import main as m
+    return [r["address"] for r in m.APP.db.wallets() if r["chain"] == "solana"]
+
+
 class Resp:
     def __init__(self, data, status=200):
         self._d, self.status_code, self.text = data, status, str(data)
@@ -134,12 +139,17 @@ class FakeHttp:
         return None
 
     async def post_json(self, url, payload, **kw):
-        prog = payload["params"][1]["programId"]
-        if prog.startswith("Tokenz"):
-            return {"result": {"value": []}}
-        amt = 2_000_000 if calls.count("sol_wallet_round") else 0
-        return {"result": {"value": [{"account": {"data": {"parsed": {"info": {
-            "mint": SOL_GOOD, "tokenAmount": {"uiAmount": amt}}}}}}] if amt else []}}
+        method, params = payload["method"], payload["params"]
+        rnd = calls.count("sol_wallet_round")
+        if method == "getSignaturesForAddress":
+            return {"result": [{"signature": f"sig{rnd}-{params[0][:6]}", "err": None}]}
+        if method == "getTransaction":
+            owner = params[0].split("-", 1)[1]
+            w = next(a for a in sol_wallets() if a.startswith(owner))
+            return {"result": {"meta": {
+                "preTokenBalances": [],
+                "postTokenBalances": [{"owner": w, "mint": SOL_GOOD, "uiTokenAmount": {"uiAmount": 2_000_000}}]}}}
+        return None
 
     async def get_text(self, url, **kw):
         return RSS
@@ -173,6 +183,7 @@ class FakeHttp:
 async def main():
     import main as m
     app = m.App()
+    m.APP = app
     fake = FakeHttp()
     for obj in (app, app.tg, app.market, app.ai, app.security, app.news, app.wallets, app.xhype):
         obj.http = fake
@@ -211,6 +222,7 @@ async def main():
     hp = await app.security.check("base", EVM_HONEY, "")
     assert "FINGER WEG" in quick_verdict(hp, {}, app.s)[0]
     print(m.strip_html(app.smart_text())[:300])
+    print(m.strip_html(app.debug_text()))
 
     # 4) Manuelle Prüfung
     txt = await app.check_text(EVM_HONEY)

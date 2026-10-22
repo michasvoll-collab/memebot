@@ -35,6 +35,7 @@ HELP = """<b>🤖 MemeBot – Befehle</b>
 /check &lt;adresse&gt; – Coin sofort komplett prüfen (Honeypot, Rug, Markt, Hype, KI)
 /watch &lt;adresse&gt; [name] – Wallet beobachten (Solana oder 0x… für alle EVM-Chains)
 /unwatch &lt;adresse|name&gt; – Wallet entfernen
+/debug – warum (k)ein Call? Fehler-Diagnose
 /wallets – beobachtete Wallets · /smart – was kauft Smart Money gerade
 /sol_rpc &lt;url&gt; – eigener Solana-Zugang (z. B. Helius, kostenlos) für schnelleres Wallet-Tracking
 /calls – alle bisherigen Calls: MC beim Call, Allzeithoch danach, x-Faktor
@@ -95,6 +96,7 @@ class App:
             log.info("%d Wallets aus der Liste übernommen", n)
         self.tracker = CallTracker(self.http, self.s, self.db, self.market, self.tg)
         self.started = time.time()
+        self.awaiting = None
 
     # ------------------------- Schleifen -------------------------
     async def loop(self, name, coro_fn, interval):
@@ -170,7 +172,15 @@ class App:
                         continue
                     if chat != self.s.telegram_chat_id:
                         continue  # fremde Nutzer ignorieren
-                    if text.lower().split("@")[0].split(" ")[0] in SECRET_CMDS:
+                    first = text.lower().split()[0].split("@")[0]
+                    if self.awaiting and not text.startswith("/"):
+                        text, self.awaiting = f"{self.awaiting} {text}", None   # Schlüssel kam als eigene Nachricht
+                        first = text.split()[0]
+                    elif text.startswith("sk-ant-"):
+                        text, first = f"/ki_key {text}", "/ki_key"
+                    elif first in SECRET_CMDS and len(text.split()) == 1:
+                        self.awaiting = first   # z. B. nur "/ki_key" geschickt -> nächste Nachricht ist der Schlüssel
+                    if first in SECRET_CMDS:
                         await self.tg.delete(chat, msg.get("message_id"))  # Schlüssel/Codes nicht im Chat lassen
                     asyncio.create_task(self.handle(text))
             except Exception:
@@ -255,6 +265,8 @@ class App:
                 f"• {escape(k)} ({'+'.join(v)})" for k, v in people.items()]
             lines.append("\nEntfernen: /unwatch &lt;name&gt; · Smart-Money-Coins: /smart")
             await self.tg.send("\n".join(lines))
+        elif cmd in ("/debug", "/diagnose"):
+            await self.tg.send(self.debug_text())
         elif cmd == "/smart":
             await self.tg.send(self.smart_text())
         elif cmd == "/sol_rpc":
@@ -265,7 +277,8 @@ class App:
             await self.tg.send("✅ Eigener Solana-Zugang gespeichert – Wallets werden jetzt schneller und zuverlässiger geprüft.")
         elif cmd == "/ki_key":
             if not args or not args[0].startswith("sk-ant-"):
-                return await self.tg.send("So: /ki_key sk-ant-… (Nachricht wird danach automatisch gelöscht)")
+                return await self.tg.send("🔑 Schick mir jetzt den Claude-Schlüssel (beginnt mit sk-ant-) als nächste Nachricht. "
+                                          "Ich lösche sie sofort wieder.")
             self.s.anthropic_key = args[0].strip()
             self.db.kv_set("ki_key", self.s.anthropic_key)
             self.db.kv_set("ai_auth", None)
@@ -293,10 +306,11 @@ class App:
                 f"Wallets: {len(self.db.wallets())} · KI: {self.ai_state()} "
                 f"({self.db.ai_calls_last_hour('coin')} Coin-Analysen letzte Stunde)\n"
                 f"🐦 X: {self.x_state()}\n✈️ Telegram-Mitlesen: {self.tghype.status()}\n"
-                f"Version: {self.version()}")
+                f"👛 Wallet-Check: {self.wallet_state()}\n"
+                f"Version: {self.version()} · Details: /debug")
         elif cmd == "/x_key":
             if not args:
-                return await self.tg.send("So: /x_key &lt;dein twitterapi.io-Schlüssel&gt; (Nachricht wird gelöscht)")
+                return await self.tg.send("🔑 Schick mir jetzt den twitterapi.io-Schlüssel als nächste Nachricht. Ich lösche sie sofort wieder.")
             self.db.kv_set("x_key", args[0].strip())
             await self.tg.send("🔑 X-Schlüssel gespeichert (deine Nachricht wurde gelöscht). Teste…")
             await self.tg.send(await self.x_test())
@@ -355,6 +369,30 @@ class App:
             await self.tg.send("▶️ Coin-Alarme wieder aktiv.")
         else:
             await self.tg.send("Unbekannter Befehl. /hilfe")
+
+    def wallet_state(self) -> str:
+        w = self.db.kv_get("wallet_stats") or {}
+        if not w.get("sol_last"):
+            return "noch kein Durchlauf"
+        ago = time.time() - w["sol_last"]
+        return (f"Solana {w.get('sol_ok', 0)} ok/{w.get('sol_fail', 0)} Fehler (vor {ago:.0f} s, "
+                f"{w.get('sol_secs', 0):.0f} s Dauer, {w.get('sol_tx', 0)} Transaktionen) · "
+                f"EVM {w.get('evm_ok', 0)} ok/{w.get('evm_fail', 0)} Fehler")
+
+    def debug_text(self) -> str:
+        reasons, n = self.db.reason_stats(3)
+        st = self.db.stats()
+        trades = self.db.con.execute("SELECT COUNT(*), COUNT(DISTINCT label) FROM wallet_trades WHERE ts>?",
+                                     (time.time() - 86400,)).fetchone()
+        lines = ["<b>🔧 Diagnose</b>", "",
+                 f"In Prüfung: {st.get('pending', 0)} · gemeldet: {st.get('alerted', 0)} · aussortiert: {st.get('rejected', 0)}",
+                 f"In den letzten 3 h geprüft: {n} Coins", "", "<b>Häufigste Gründe für KEIN Call:</b>"]
+        lines += [f"• {escape(k)}: {v}" for k, v in reasons]
+        lines += ["", f"👛 Wallets: {self.wallet_state()}",
+                  f"Wallet-Trades 24 h: {trades[0]} von {trades[1]} Wallets",
+                  f"🐦 X: {self.x_state()} · 🧠 KI: {self.ai_state()} "
+                  f"({self.db.ai_calls_last_hour('coin')} Analysen/h)"]
+        return "\n".join(lines)
 
     def smart_text(self) -> str:
         hours = self.s.get("wallets", "cluster_hours", default=12)

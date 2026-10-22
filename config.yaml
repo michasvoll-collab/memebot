@@ -17,7 +17,9 @@ scan_interval_sec: 45
 # Wie oft (Sekunden) noch nicht passende Coins erneut geprüft werden
 recheck_interval_sec: 180
 # Wie lange (Stunden) ein neuer Coin maximal beobachtet wird
-max_watch_hours: 24
+max_watch_hours: 8
+# Wie viele Coins pro Durchlauf geprüft werden
+batch_per_cycle: 150
 
 # ------------------------------------------------------------
 # Markt-Kriterien – ALLE müssen erfüllt sein

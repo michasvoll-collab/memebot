@@ -10,12 +10,29 @@ from .market import IGNORE_SYMBOLS, pair_metrics
 log = logging.getLogger("wallets")
 SPL = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 SPL22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCxEpPxuEb"
+SOL_IGNORE_MINTS = {"So11111111111111111111111111111111111111112",   # wSOL
+                    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",   # USDC
+                    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"}   # USDT
+
+
+def token_deltas(meta, owner) -> dict[str, tuple[float, float]]:
+    """Token-Bestand der Wallet vor/nach einer Transaktion, je Mint."""
+    out: dict[str, list[float]] = {}
+    for idx, field in ((0, "preTokenBalances"), (1, "postTokenBalances")):
+        for b in meta.get(field) or []:
+            if b.get("owner") != owner:
+                continue
+            amt = float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+            out.setdefault(b["mint"], [0.0, 0.0])[idx] += amt
+    return {k: (v[0], v[1]) for k, v in out.items()}
 
 
 class WalletTracker:
     def __init__(self, http, settings, db, market, security, tg, scanner):
         self.http, self.s, self.db = http, settings, db
         self.market, self.sec, self.tg, self.scanner = market, security, tg, scanner
+        self.stats = {"sol_ok": 0, "sol_fail": 0, "sol_tx": 0, "sol_last": 0, "sol_secs": 0,
+                      "evm_ok": 0, "evm_fail": 0, "evm_last": 0, "trades": 0}
 
     @property
     def cfg(self):
@@ -44,14 +61,21 @@ class WalletTracker:
         await self.run_evm()
 
     async def run_solana(self):
+        t0 = time.time()
+        for k in ("sol_ok", "sol_fail", "sol_tx"):
+            self.stats[k] = 0
         for w in self.db.wallets():
             if w["chain"] == "solana":
                 try:
                     await self._solana(w["address"], w["label"])
                 except Exception:
                     log.exception("Wallet-Fehler %s", w["address"])
+        self.stats["sol_last"] = time.time()
+        self.stats["sol_secs"] = time.time() - t0
+        self.db.kv_set("wallet_stats", self.stats)
 
     async def run_evm(self):
+        self.stats["evm_ok"] = self.stats["evm_fail"] = 0
         for w in self.db.wallets():
             if w["chain"] == "solana":
                 continue
@@ -61,6 +85,8 @@ class WalletTracker:
                         await self._evm(chain, w["address"], w["label"])
                     except Exception:
                         log.exception("Wallet-Fehler %s %s", chain, w["address"])
+        self.stats["evm_last"] = time.time()
+        self.db.kv_set("wallet_stats", self.stats)
 
     # ------------------------- EVM -------------------------
     async def _fetch_tokentx(self, chain, wallet) -> list[dict] | None:
@@ -83,7 +109,9 @@ class WalletTracker:
     async def _evm(self, chain, wallet, label):
         txs = await self._fetch_tokentx(chain, wallet)
         if txs is None:
+            self.stats["evm_fail"] += 1
             return
+        self.stats["evm_ok"] += 1
         init_key = f"wallet_init:{chain}:{wallet}"
         first_run = not self.db.kv_get(init_key)
         w = wallet.lower()
@@ -117,36 +145,45 @@ class WalletTracker:
             await self._report(chain, wallet, label, token, e["dir"], e["amount"])
 
     # ------------------------- Solana -------------------------
-    async def _sol_holdings(self, wallet) -> dict[str, float] | None:
-        out: dict[str, float] = {}
-        for prog in (SPL, SPL22):
-            res = await self.http.post_json(self.s.solana_rpc, {
-                "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountsByOwner",
-                "params": [wallet, {"programId": prog}, {"encoding": "jsonParsed", "commitment": "confirmed"}],
-            })
-            if not res or "result" not in res:
-                return None
-            for acc in res["result"].get("value", []):
-                info = acc["account"]["data"]["parsed"]["info"]
-                amt = float(info["tokenAmount"].get("uiAmount") or 0)
-                out[info["mint"]] = out.get(info["mint"], 0) + amt
-        return out
+    async def _rpc(self, method, params):
+        res = await self.http.post_json(self.s.solana_rpc, {"jsonrpc": "2.0", "id": 1, "method": method,
+                                                             "params": params})
+        if not res or "result" not in res:
+            return None
+        return res["result"]
 
     async def _solana(self, wallet, label):
-        now = await self._sol_holdings(wallet)
-        if now is None:
+        """Neue Transaktionen der Wallet lesen und Token-Saldo-Änderungen auswerten (Kauf/Verkauf)."""
+        sigs = await self._rpc("getSignaturesForAddress", [wallet, {"limit": 15, "commitment": "confirmed"}])
+        if sigs is None:
+            self.stats["sol_fail"] += 1
             return
-        key = f"sol_snapshot:{wallet}"
-        before = self.db.kv_get(key)
-        self.db.kv_set(key, now)
-        if before is None:
+        self.stats["sol_ok"] += 1
+        key = f"solsig:{wallet}"
+        last = self.db.kv_get(key)
+        if sigs:
+            self.db.kv_set(key, sigs[0]["signature"])
+        if last is None:
             return  # erster Durchlauf: nur merken
-        for mint in set(now) | set(before):
-            a, b = before.get(mint, 0.0), now.get(mint, 0.0)
-            if b > a * 1.05 and b - a > 0:
-                await self._report("solana", wallet, label, mint, "in", b - a, new_position=(a == 0))
-            elif b < a * 0.95:
-                await self._report("solana", wallet, label, mint, "out", a - b, closed=(b == 0))
+        new = []
+        for sg in sigs:
+            if sg["signature"] == last:
+                break
+            if not sg.get("err"):
+                new.append(sg["signature"])
+        for sig in reversed(new[:6]):
+            tx = await self._rpc("getTransaction", [sig, {"encoding": "jsonParsed", "commitment": "confirmed",
+                                                          "maxSupportedTransactionVersion": 0}])
+            if not tx or not tx.get("meta"):
+                continue
+            self.stats["sol_tx"] += 1
+            for mint, (pre, post) in token_deltas(tx["meta"], wallet).items():
+                if mint in SOL_IGNORE_MINTS:
+                    continue
+                if post > pre * 1.02 and post - pre > 0:
+                    await self._report("solana", wallet, label, mint, "in", post - pre, new_position=(pre == 0))
+                elif post < pre * 0.98:
+                    await self._report("solana", wallet, label, mint, "out", pre - post, closed=(post == 0))
 
     # ------------------------- Meldung -------------------------
     async def _report(self, chain, wallet, label, token, direction, amount, new_position=False, closed=False):
@@ -161,6 +198,7 @@ class WalletTracker:
         if value < self.cfg.get("min_buy_usd", 100):
             return
         self.db.add_wallet_trade(chain, token, wallet, label, direction, value, m["mcap"], closed)
+        self.stats["trades"] += 1
 
         hours = self.cfg.get("cluster_hours", 12)
         need = self.cfg.get("cluster_min_wallets", 4)
