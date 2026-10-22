@@ -247,7 +247,7 @@ class WalletTracker:
 
     async def _single(self, chain, wallet, label, token, m, value, new_position, n, need):
         mode = self.cfg.get("single_alerts", "private")
-        if mode == "off":
+        if mode in ("off", False, None):
             return
         last = self.db.kv_get(f"wsingle:{token}", 0)
         if time.time() - last < 1200:   # pro Coin max. alle 20 Min eine Einzelmeldung
@@ -283,12 +283,15 @@ class WalletTracker:
         blines = [f"• <b>{escape(b['label'])}</b> {usd(b['usd'])} bei MC {usd(b['entry_mcap'])} "
                   f"({(time.time() - b['ts']) / 60:.0f} min her){' – schon raus' if b['exited'] else ''}"
                   for b in buyers[:12]]
+        import re as _re
+        plain = _re.sub(r"<[^>]+>", "", verdict).split("–", 1)[-1].strip()
+        label = ("✅ KAUFEN" if ok else "⏳ WARTEN" if verdict.startswith("🟡") else "⏭️ ÜBERSPRINGEN")
+        ev.override = (label, plain)
         head = (f"🐋 SMART-MONEY-CALL – {n} Wallets kaufen" if first else f"🐋 SMART MONEY: jetzt {n} Wallets drin")
         body = coin_message(ev, header=head)
         extra = ["", "<b>👥 Wer ist drin:</b>"] + blines
         if entry:
             extra.append(f"Erster Einstieg bei MC {usd(entry)} → jetzt {usd(m['mcap'])} ({m['mcap'] / entry:.1f}x)")
-        extra += ["", f"<b>🧭 Meine Meinung:</b> {verdict}"]
         # Meinung + Wallets direkt unter die Kopfzeile setzen
         top, rest = body.split("\n", 1)
         await self.tg.alert(top + "\n" + "\n".join(extra) + "\n" + rest)
@@ -319,8 +322,7 @@ def quick_verdict(sec, m, s, ev=None, buyers=None) -> tuple[str, bool]:
         probs.append("Market Cap schon hoch – weniger Luft nach oben")
     score = ev.total if ev else None
     if not probs and (score is None or score >= s.get("min_score", default=65) - 5):
-        return ("✅ <b>Einstieg vertretbar</b> – Sicherheit ok, Smart Money ist drin. "
-                "Klein einsteigen, bei 2x den Einsatz rausnehmen, Stop-Loss bei −50 %."), True
+        return "✅ <b>Einstieg vertretbar</b> – Sicherheit ok, Smart Money ist drin, nicht zu spät.", True
     if not probs:
         probs.append(f"Gesamt-Score nur {score}/100")
     return "🟡 <b>Nur mit kleinem Einsatz / abwarten</b> – " + escape("; ".join(probs)) + ".", False

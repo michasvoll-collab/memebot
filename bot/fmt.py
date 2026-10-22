@@ -2,6 +2,13 @@
 from html import escape
 
 from .chains import CHAINS
+from .plan import decision_block
+
+_SETTINGS = [None]   # wird beim Start gesetzt (fmt.set_settings)
+
+
+def set_settings(s):
+    _SETTINGS[0] = s
 
 
 def usd(v) -> str:
@@ -59,7 +66,8 @@ def bar(score: int) -> str:
     return "🟩" * full + "⬜" * (10 - full)
 
 
-def coin_message(ev, header="🚀 NEUER COIN – alle Kriterien erfüllt", is_call=True) -> str:
+def coin_message(ev, header="🚀 NEUER COIN – alle Kriterien erfüllt", is_call=True, settings=None) -> str:
+    settings = settings or _SETTINGS[0]
     m, sec, chain, addr = ev.metrics, ev.security, ev.chain, ev.address
     f = sec.facts if sec else {}
     lines = [
@@ -72,6 +80,8 @@ def coin_message(ev, header="🚀 NEUER COIN – alle Kriterien erfüllt", is_ca
          else f"📍 Aktuelle MC {usd(m['mcap'])} · Preis {price(m['price'])}"),
         f"⭐ Gesamt: <b>{ev.total}/100</b> {bar(ev.total)}",
         f"   Sicherheit {ev.sec_score} · Markt {ev.market_score} · Hype {ev.hype_score}",
+        "",
+        *decision_block(ev, settings),
         "",
         f"💰 Preis {price(m['price'])} · MCap {usd(m['mcap'])} · Liq {usd(m['liquidity'])}",
         f"📊 Vol 1h {usd(m['vol_1h'])} · 24h {usd(m['vol_24h'])} · Trades 1h {m['txns_1h']:.0f} "

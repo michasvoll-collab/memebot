@@ -29,7 +29,7 @@ market:
   max_liquidity_usd: 5000000
   min_market_cap_usd: 30000
   max_market_cap_usd: 250000      # Tag-1-Auswertung: über 250K stürzten 73 % ab
-  min_age_minutes: 30             # Tag 1: unter 30 min stürzten 77 % ab
+  min_age_minutes: 10             # vorher 30; die 15-Min-Bestätigung fängt frühe Rugs ab
   max_age_hours: 72
   min_volume_1h_usd: 10000
   min_txns_1h: 50                 # Käufe + Verkäufe in der letzten Stunde
@@ -63,6 +63,14 @@ security:
 
 # Mindest-Gesamtpunktzahl (0–100) für einen Alarm
 min_score: 65
+# Risiko-Regeln für den Trade-Plan in jedem Call
+risk:
+  stake_eur: 10              # Einsatz pro Call
+  take_profit_x: 2           # Ziel 1: Einsatz rausnehmen
+  target2_x: 5               # Ziel 2
+  stop_loss_pct: 50          # Stop-Loss
+  max_entry_above_pct: 30    # nicht mehr kaufen, wenn schon so viel % über Call-MC
+
 # Mindest-Markt-Punkte (Tag 2: unter 70 lief es deutlich schlechter)
 min_market_score: 70
 # Gewichtung der Gesamtpunkte – Hype zählt am meisten
@@ -86,9 +94,9 @@ wallets:
   evm_interval_sec: 300           # EVM-Wallets (Ethereum/Base/BSC/Arbitrum) – seltener, schont die Limits
   alert_on_unsafe: true
   min_buy_usd: 300                # kleinere Käufe ignorieren (Spam / Airdrops)
-  single_alerts: private          # einzelne Wallet-Käufe: private | channel | off
+  single_alerts: "off"            # einzelne Wallet-Käufe: private | channel | off
   sell_alerts: false              # einzelne Verkäufe melden?
-  cluster_min_wallets: 4          # ab so vielen Wallets im selben Coin -> SMART-MONEY-CALL in den Kanal
+  cluster_min_wallets: 3          # ab so vielen Wallets im selben Coin -> SMART-MONEY-CALL in den Kanal
   cluster_hours: 12               # Zeitfenster dafür
   # Smart-Money-Wallets: [Name, Solana, (EVM)] – Top-Trader von kolscan.io (Monat) + Haupt-Wallets
   # list_version erhöhen = alte Listen-Wallets werden ersetzt (mit /watch hinzugefügte bleiben)

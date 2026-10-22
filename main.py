@@ -70,6 +70,8 @@ SECRET_CMDS = ("/sol_rpc", "/ki_key", "/x_key", "/tg_api", "/tg_login", "/tg_cod
 class App:
     def __init__(self):
         self.s = Settings()
+        from bot import fmt as _fmt
+        _fmt.set_settings(self.s)
         self.db = DB(self.s.db_path)
         if not self.s.telegram_chat_id:
             self.s.telegram_chat_id = self.db.kv_get("owner_chat", "") or ""
