@@ -65,7 +65,11 @@ security:
 min_score: 65
 # Risiko-Regeln für den Trade-Plan in jedem Call
 risk:
-  stake_eur: 10              # Einsatz pro Call
+  stake_low: 5               # Einsatz bei Score unter score_mid
+  stake_mid: 10              # Einsatz bei Score ab score_mid
+  stake_high: 20             # Einsatz bei Score ab score_high oder 3+ Smart-Money-Wallets
+  score_mid: 75
+  score_high: 85
   take_profit_x: 2           # Ziel 1: Einsatz rausnehmen
   target2_x: 5               # Ziel 2
   stop_loss_pct: 50          # Stop-Loss

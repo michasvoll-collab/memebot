@@ -48,13 +48,23 @@ def decide(ev, settings) -> tuple[str, str]:
     return "✅ KAUFEN", ", ".join(why) or f"alle Kriterien erfüllt (Score {ev.total})"
 
 
+def stake_for(ev, r) -> tuple[float, str]:
+    """Einsatz nach Signal-Stärke: schwach = klein, stark = voll."""
+    smart = len(getattr(ev, "smart", []) or [])
+    if smart >= 3 or ev.total >= r.get("score_high", 85):
+        return r.get("stake_high", 20), "starkes Signal"
+    if ev.total >= r.get("score_mid", 75):
+        return r.get("stake_mid", 10), "mittleres Signal"
+    return r.get("stake_low", 5), "schwächeres Signal"
+
+
 def plan_lines(ev, settings) -> list[str]:
     """Trade-Plan in Market-Cap-Zahlen + feste Risiko-Regeln."""
     r = settings.section("risk") or {}
     mc = ev.metrics.get("mcap") or 0
     if not mc:
         return []
-    stake = r.get("stake_eur", 10)
+    stake, level = stake_for(ev, r)
     tp1, tp2 = r.get("take_profit_x", 2), r.get("target2_x", 5)
     sl = r.get("stop_loss_pct", 50)
     chase = r.get("max_entry_above_pct", 30)
@@ -64,7 +74,7 @@ def plan_lines(ev, settings) -> list[str]:
         f"• Ziel 1: MC {usd(mc * tp1)} ({tp1:g}x) → Einsatz rausnehmen",
         f"• Ziel 2: MC {usd(mc * tp2)} ({tp2:g}x) → Rest teilweise verkaufen",
         f"• Stop-Loss: MC {usd(mc * (1 - sl / 100))} (−{sl:g} %) → komplett raus",
-        f"💶 Einsatz max. {stake:g} € · nie mehr, als du verlieren kannst",
+        f"💶 Einsatz: <b>{stake:g} €</b> ({level}) · nie mehr, als du verlieren kannst",
     ]
 
 
