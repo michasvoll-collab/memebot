@@ -39,8 +39,16 @@ class WalletTracker:
         return self.s.section("wallets")
 
     def import_list(self) -> int:
-        """Wallet-Liste aus config.yaml übernehmen (nur neue; mit /unwatch entfernte bleiben weg)."""
+        """Wallet-Liste aus config.yaml übernehmen. Neue list_version = alte Listen-Wallets ersetzen
+        (mit /watch selbst hinzugefügte bleiben, mit /unwatch entfernte kommen nicht zurück)."""
+        version = self.cfg.get("list_version", 1)
         done = set(self.db.kv_get("wallet_list_done", []))
+        if self.db.kv_get("wallet_list_version", 1) != version:
+            for a in done:
+                self.db.con.execute("DELETE FROM wallets WHERE address=? OR address=?", (a, a.lower()))
+            self.db.con.commit()
+            done = set()
+            self.db.kv_set("wallet_list_version", version)
         n = 0
         for entry in self.cfg.get("list") or []:
             label, *addrs = entry
@@ -80,7 +88,7 @@ class WalletTracker:
             if w["chain"] == "solana":
                 continue
             for chain in EVM_CHAINS:
-                if chain in self.s.chains:
+                if chain in self.s.chains and (self.s.etherscan_key or CHAINS[chain]["blockscout"]):
                     try:
                         await self._evm(chain, w["address"], w["label"])
                     except Exception:

@@ -253,6 +253,13 @@ async def main():
     assert b["places"] == 2, b
     print(m.strip_html(await app.hot_text()))
 
+    # 7b) Neue Wallet-Liste ersetzt die alte
+    app.s.overrides["wallets.list"] = [["neu1", SOL_RUG]]
+    app.s.overrides["wallets.list_version"] = 99
+    app.wallets.import_list()
+    labels = {w["label"] for w in app.db.wallets()}
+    assert "neu1" in labels and "@rasmr" not in labels and "Sol Wal" in labels, labels
+
     # 8) /set /get (bleibt gespeichert)
     print(app.set_cmd(["min_score", "70"]))
     assert app.s.get("min_score") == 70 and app.db.kv_get("overrides")["min_score"] == 70
